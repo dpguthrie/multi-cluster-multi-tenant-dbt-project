@@ -33,7 +33,7 @@ class ParseDirectory:
         for file in self.files:
             parser = None
             if file.suffix == '.sql':
-                if self.directory == 'models':
+                if self.directory in ['models', 'seeds', 'snapshots']:
                     parser = ModelParser
                 elif self.directory == 'macros':
                     parser = MacroParser
@@ -80,6 +80,7 @@ class FileParser:
     def file_path_and_file(self):
         return self.file_path / self.file_name
     
+    
     def after_file_contents(self):
         return ''
         
@@ -118,16 +119,16 @@ class SchemaParser(FileParser):
         with self.file.open() as fp:
             data = yaml.safe_load(fp)
         
-        if 'models' in data:
+        if any([i in data for i in ['models', 'seeds', 'snapshots']]):
             data = self._modify_yml_for_models(data)
         if 'sources' in data:
             data = self._modify_yml_for_sources(data)
         return data
             
-    def _modify_yml_for_models(self, data: Dict):
-        models = data['models']
-        for model in models:
-            model['name'] = f"{self.customer}_{model['name']}"
+    def _modify_yml_for_models(self, data: Dict, key='models'):
+        items = data[key]
+        for item in items:
+            item['name'] = f"{self.customer}_{item['name']}"
         return data
     
     def _modify_yml_for_sources(self, data: Dict):
@@ -177,7 +178,7 @@ class DocParser(MacroParser):
         
     @property
     def file_path(self):
-        """Each tenant can leverage the same macro"""
+        """Each tenant can leverage the same docs"""
         return self.tenant_directory.joinpath(self.directory, 'shared')
 
 
@@ -211,3 +212,18 @@ if __name__ == '__main__':
             for directory in DIRECTORIES:
             
                 ParseDirectory(tenant_directory, directory, customer).run()
+
+
+"""
+TODO: Should there be a way to ignore stuff?
+TODO: Create a github action (P0)
+TODO: Need to pull stuff out of the main dbt_project.yml file.  Need to alter at least the models config and change the project name underneath
+      as well as adding the same paths to each tenant (P0)
+TODO: Think of an appropriate workflow for this -> How are you making changes to core and then updating each of the environments? (P0)
+TODO: Pinning to a release is great and all as far as the code you return, but the database has already been changed to something else
+      Think about this in the context of the above point.  What are some ways that we can build this (i.e. I make a breaking change
+      to my core models, but I build them in different tables.  That way I ensure proper deprecation.)  HOW CAN I DO THIS PROGRAMMATICALLY?
+TODO: Change the core project to inclue the config piece.  The before/after is a bit hacky (P1)
+TODO: How do exposures work in this world?  Do they?  (P3)
+
+"""
