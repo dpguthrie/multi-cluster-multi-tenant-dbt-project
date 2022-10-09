@@ -1,6 +1,7 @@
 # stdlib
 from pathlib import Path, PosixPath
 from typing import Dict
+import re
 
 # third party
 import yaml
@@ -80,20 +81,10 @@ class FileParser:
     def file_path_and_file(self):
         return self.file_path / self.file_name
     
-    
-    def after_file_contents(self):
-        return ''
-        
-    def before_file_contents(self):
-        return ''
-    
     def write_file_contents(self, encoding='utf-8'):
-        before = self.before_file_contents()
         file_contents = self.file_contents
-        after = self.after_file_contents()
-        all_contents = before + file_contents + after
         with self.file_path_and_file.open('w', encoding=encoding) as f:
-            f.write(all_contents)
+            f.write(file_contents)
             
     def run(self):
         self.file_path.mkdir(parents=True, exist_ok=True)
@@ -125,10 +116,11 @@ class SchemaParser(FileParser):
             data = self._modify_yml_for_sources(data)
         return data
             
-    def _modify_yml_for_models(self, data: Dict, key='models'):
-        items = data[key]
-        for item in items:
-            item['name'] = f"{self.customer}_{item['name']}"
+    def _modify_yml_for_models(self, data: Dict):
+        for key in ['models', 'seeds', 'snapshots']:
+            items = data.get(key, [])
+            for item in items:
+                item['name'] = f"{self.customer}_{item['name']}"
         return data
     
     def _modify_yml_for_sources(self, data: Dict):
@@ -192,10 +184,40 @@ class ModelParser(FileParser):
     ):
         super().__init__(tenant_directory, file, resource, customer)
         
-    def before_file_contents(self):
-        return f"{{{{ config(schema='{self.customer}', alias='{self.file.stem}') }}}}\n\n"
+    REF_SINGLE_QUOTE = "(?<=ref\(').*?(?='\))"
+    REF_DOUBLE_QUOTE = '(?<=ref\(").*?(?="\))'
+    CONFIG_SEARCH = '(?<=config\()[\s\S]*?(?=\))'
+     
+    @property
+    def REQUIRED_CONFIGS(self):
+        return f"schema='{self.customer}', alias='{self.file.stem}'"
 
+    def _prefix_customer(self, match_obj):
+        if match_obj.group() is not None:
+            return f'{self.customer}_{match_obj.group()}'
+        
+    def _append_required_configs(self, match_obj):
+        if match_obj.group() is not None:
+            return f"{match_obj.group()}, {self.REQUIRED_CONFIGS}"
+        
+    def _modify_refs(self, sql: str):
+        sql = re.sub(self.REF_SINGLE_QUOTE, self._prefix_customer, sql)
+        sql = re.sub(self.REF_DOUBLE_QUOTE, self._prefix_customer, sql)        
+        return sql
 
+    def _modify_config(self, sql: str):
+        sql = re.sub(self.CONFIG_SEARCH, self._append_required_configs, sql)
+        if not re.findall(self.REQUIRED_CONFIGS, sql):
+            sql = f"{{{{ config({self.REQUIRED_CONFIGS}) }}}}\n\n{sql}"
+        
+        return sql
+
+    @property
+    def file_contents(self):
+        sql = self.file.read_text()
+        sql = self._modify_config(sql)
+        sql = self._modify_refs(sql)
+        return sql
 
 
 if __name__ == '__main__':
